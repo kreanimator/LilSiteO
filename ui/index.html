@@ -1,0 +1,92 @@
+<!-- ui/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LilSiteO</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">◔</div>
+      <div>
+        <div class="title">LilSiteO</div>
+        <div class="subtitle">prompt → static site → preview</div>
+      </div>
+    </div>
+
+    <div class="session">
+      <label for="sessionId">Session</label>
+      <input id="sessionId" placeholder="auto" spellcheck="false" />
+      <button id="newSessionBtn" class="btn">New</button>
+      <button id="connectBtn" class="btn">Connect</button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel left">
+      <div class="tabs">
+        <button class="tab active" data-tab="chat">Chat</button>
+        <button class="tab" data-tab="logs">Logs</button>
+      </div>
+
+      <div class="tabbody active" id="tab-chat">
+        <div id="messages" class="messages"></div>
+
+        <form id="promptForm" class="composer">
+          <textarea id="promptInput" rows="3" placeholder="Describe the site you want…"></textarea>
+          <div class="composerRow">
+            <button type="submit" class="btn primary">Send</button>
+            <button type="button" id="generateBtn" class="btn">Generate</button>
+            <button type="button" id="openPreviewBtn" class="btn">Open preview</button>
+          </div>
+          <div class="hint">
+            Tip: keep it simple (goal, sections, style, colors). Multi-page is fine (privacy/terms/contact).
+          </div>
+        </form>
+      </div>
+
+      <div class="tabbody" id="tab-logs">
+        <div class="logHeader">
+          <div class="muted">Streaming events</div>
+          <button id="clearLogsBtn" class="btn small">Clear</button>
+        </div>
+        <pre id="logs" class="logs"></pre>
+      </div>
+    </section>
+
+    <section class="panel right">
+      <div class="previewHeader">
+        <div class="muted">Preview</div>
+        <div class="previewUrlWrap">
+          <input id="previewUrl" spellcheck="false" readonly />
+          <button id="reloadPreviewBtn" class="btn small">Reload</button>
+        </div>
+      </div>
+
+      <div class="previewFrameWrap">
+        <!-- Dark empty-state overlay -->
+        <div id="previewEmpty" class="previewEmpty">
+          <div class="previewEmptyTitle">No preview yet</div>
+          <div class="previewEmptyText">Click <b>Generate</b> to publish a site and load it here.</div>
+        </div>
+
+        <iframe id="previewFrame" title="Preview"></iframe>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="muted">
+      Agent API: <span id="apiBaseLabel"></span>
+    </div>
+    <div class="muted">
+      WS: <span id="wsStatus">disconnected</span>
+    </div>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
