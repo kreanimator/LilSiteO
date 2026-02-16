@@ -1,0 +1,4 @@
+LLM_BASE_URL=http://localhost:8000
+LLM_MODEL=Qwen/Qwen2.5-Coder-7B-Instruct
+LLM_API_KEY=EMPTY
+LLM_TIMEOUT_S=120
