@@ -15,7 +15,7 @@ class Config:
     
     # LLM settings
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://localhost:8000").rstrip("/")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-Coder-7B-Instruct")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-Coder-6.7B-Instruct")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "EMPTY")
     LLM_TIMEOUT_S: float = float(os.getenv("LLM_TIMEOUT_S", "300"))  # 5 minutes for generation
     

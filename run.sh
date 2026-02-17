@@ -34,7 +34,7 @@ if [ -f .env ]; then
 fi
 
 # Set default model if not set
-LLM_MODEL="${LLM_MODEL:-Qwen/Qwen2.5-Coder-7B-Instruct}"
+LLM_MODEL="${LLM_MODEL:-deepseek-ai/DeepSeek-Coder-6.7B-Instruct}"
 
 # Check if vLLM server is running, start it if not
 echo -e "\n${YELLOW}Checking vLLM server...${NC}"
@@ -61,32 +61,69 @@ else
     # Start vLLM in background
     echo -e "${BLUE}Starting vLLM server with model: ${LLM_MODEL}${NC}"
     cd services/agent
+    
+    # Add trust-remote-code for DeepSeek models
+    VLLM_FLAGS=""
+    if [[ "$LLM_MODEL" == *"deepseek"* ]]; then
+        VLLM_FLAGS="--trust-remote-code"
+        echo -e "${YELLOW}Using --trust-remote-code flag for DeepSeek model${NC}"
+    fi
+    
     python -m vllm.entrypoints.openai.api_server \
         --host 0.0.0.0 \
         --port 8000 \
-        --model "$LLM_MODEL" > /tmp/lilsite_vllm.log 2>&1 &
+        --model "$LLM_MODEL" \
+        $VLLM_FLAGS > /tmp/lilsite_vllm.log 2>&1 &
     VLLM_PID=$!
     cd "$SCRIPT_DIR"
     
-    # Wait for vLLM to start
-    echo -e "${YELLOW}Waiting for vLLM to start (this may take a minute)...${NC}"
-    MAX_WAIT=120
+    # Wait for vLLM to start (longer timeout for model download/initialization)
+    echo -e "${YELLOW}Waiting for vLLM to start...${NC}"
+    echo -e "${YELLOW}Note: First-time model download can take 5-10 minutes depending on your connection${NC}"
+    echo -e "${YELLOW}Model initialization may take 1-2 minutes after download${NC}"
+    MAX_WAIT=600  # 10 minutes for download + initialization
     WAITED=0
+    LAST_STATUS=0
+    
     while [ $WAITED -lt $MAX_WAIT ]; do
+        # Check if process is still running
+        if ! kill -0 $VLLM_PID 2>/dev/null; then
+            echo -e "\n${RED}✗ vLLM process died during startup${NC}"
+            echo -e "${YELLOW}Check /tmp/lilsite_vllm.log for errors:${NC}"
+            tail -30 /tmp/lilsite_vllm.log
+            exit 1
+        fi
+        
+        # Check if server is responding
         if curl -s http://localhost:8000/v1/models > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ vLLM server started (PID: $VLLM_PID)${NC}"
+            echo -e "\n${GREEN}✓ vLLM server started (PID: $VLLM_PID)${NC}"
             break
         fi
+        
+        # Show progress every 30 seconds
+        if [ $((WAITED % 30)) -eq 0 ] && [ $WAITED -gt 0 ]; then
+            minutes=$((WAITED / 60))
+            seconds=$((WAITED % 60))
+            echo -e "\n${YELLOW}[${minutes}m ${seconds}s] Still initializing... (checking /tmp/lilsite_vllm.log for progress)${NC}"
+        else
+            echo -n "."
+        fi
+        
         sleep 2
         WAITED=$((WAITED + 2))
-        echo -n "."
     done
     echo ""
     
     if [ $WAITED -ge $MAX_WAIT ]; then
-        echo -e "${RED}✗ vLLM server failed to start within ${MAX_WAIT}s${NC}"
-        echo -e "${YELLOW}Check /tmp/lilsite_vllm.log for errors${NC}"
-        tail -20 /tmp/lilsite_vllm.log
+        echo -e "${RED}✗ vLLM server failed to start within ${MAX_WAIT}s (10 minutes)${NC}"
+        echo -e "${YELLOW}This might be due to:${NC}"
+        echo -e "  - Slow internet (model still downloading)"
+        echo -e "  - Insufficient VRAM/RAM"
+        echo -e "  - Model initialization error"
+        echo -e "\n${YELLOW}Check /tmp/lilsite_vllm.log for details:${NC}"
+        tail -50 /tmp/lilsite_vllm.log
+        echo -e "\n${YELLOW}You can manually start vLLM and check the full log:${NC}"
+        echo -e "  tail -f /tmp/lilsite_vllm.log"
         exit 1
     fi
 fi
