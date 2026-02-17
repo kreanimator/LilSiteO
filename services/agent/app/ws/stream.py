@@ -145,41 +145,63 @@ async def websocket_stream(websocket: WebSocket, session_id: str):
             await websocket.close()
             return
         
-        await websocket.send_json(log_event("WebSocket connected. Ready for generation."))
+        await websocket.send_json(log_event("WebSocket connected. Ready for chat and generation."))
         
-        # Wait for generate command or auto-start if messages exist
+        # Send welcome message
         messages = storage.get_messages(session_id)
-        if messages:
-            # Auto-start generation if there are messages
-            await websocket.send_json(assistant_message_event("💬 I see your message! Starting generation..."))
-            await websocket.send_json(log_event("Messages found. Starting generation..."))
-            await generate_site_stream(websocket, session_id)
-        else:
-            # Send welcome message telling user to press Generate
+        if not messages:
             await websocket.send_json(assistant_message_event(
-                "👋 Hello! I'm ready to generate a website for you.\n\n"
+                "👋 Hello! I'm ready to help you create a website.\n\n"
                 "📝 **How to use:**\n"
-                "1. Type your website description in the chat\n"
-                "2. Click **Send** to save your message\n"
-                "3. Click **Generate** to start building your site\n\n"
+                "1. Type your website description in the chat and click **Send**\n"
+                "2. We can discuss and refine your idea\n"
+                "3. When ready, click **Generate** to build your site\n\n"
                 "I'll create a complete static website with HTML, CSS, and any needed pages!"
             ))
-            await websocket.send_json(log_event("Waiting for user to send message and click Generate..."))
-            # Wait for generate command via WebSocket message
-            try:
-                while True:
-                    data = await websocket.receive_text()
-                    try:
-                        msg = json.loads(data)
-                        if msg.get("action") == "generate":
-                            await generate_site_stream(websocket, session_id)
-                            break
-                    except json.JSONDecodeError:
-                        if data.strip().lower() == "generate":
-                            await generate_site_stream(websocket, session_id)
-                            break
-            except WebSocketDisconnect:
-                pass
+        
+        # Wait for messages (chat or generate command)
+        try:
+            while True:
+                data = await websocket.receive_text()
+                try:
+                    msg = json.loads(data)
+                    action = msg.get("action")
+                    
+                    if action == "generate":
+                        # Start generation
+                        await generate_site_stream(websocket, session_id)
+                        # After generation, continue listening for more messages
+                        continue
+                    elif action == "chat":
+                        # Handle chat message
+                        user_message = msg.get("message", "")
+                        if user_message:
+                            # Store message
+                            storage.add_message(session_id, "user", user_message)
+                            
+                            # Get agent response
+                            from llm.prompts import get_chat_response_prompt
+                            conversation_history = storage.get_messages(session_id)
+                            prompt_messages = get_chat_response_prompt(user_message, conversation_history[:-1])
+                            
+                            llm = LLMClient()
+                            response = llm.chat(prompt_messages, temperature=0.7, max_tokens=500)
+                            
+                            # Store assistant response
+                            storage.add_message(session_id, "assistant", response)
+                            
+                            # Send response via WebSocket
+                            await websocket.send_json(assistant_message_event(response))
+                            await websocket.send_json(log_event(f"Agent responded to: {user_message[:50]}..."))
+                    
+                except json.JSONDecodeError:
+                    # Legacy: handle plain text "generate" command
+                    if data.strip().lower() == "generate":
+                        await generate_site_stream(websocket, session_id)
+                        continue
+                        
+        except WebSocketDisconnect:
+            pass
         
     except WebSocketDisconnect:
         pass

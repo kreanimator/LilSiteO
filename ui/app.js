@@ -287,7 +287,17 @@ function setSessionId(id) {
   
   if (currentSessionId) {
     sessionIdInput.value = currentSessionId;
-    // Don't auto-load preview on init
+    // Auto-connect WebSocket on page load
+    connectWs(currentSessionId);
+  } else {
+    // Create a new session and connect on launch
+    try {
+      const id = await createSession();
+      setSessionId(id);
+      connectWs(id);
+    } catch (e) {
+      appendLog(`[error] Failed to create session: ${e.message}`);
+    }
   }
 })();
 
@@ -297,6 +307,7 @@ newSessionBtn.addEventListener("click", async () => {
     messagesEl.innerHTML = "";
     logsEl.textContent = "";
     setSessionId(id);
+    // Connect WebSocket immediately
     connectWs(id);
   } catch (e) {
     appendLog(`[error] ${e.message}`);
@@ -323,18 +334,37 @@ promptForm.addEventListener("submit", async (e) => {
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 
+  // Ensure WebSocket is connected
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    appendLog("[ui] Connecting WebSocket...");
+    connectWs(currentSessionId);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
   appendMessage("user", text);
   promptInput.value = "";
 
-  // Store message and get agent response
+  // Store message server-side first
   try {
-    const response = await postMessage(currentSessionId, "user", text);
-    if (response && response.assistant_response) {
-      appendMessage("assistant", response.assistant_response);
-      appendLog(`[assistant] ${response.assistant_response}`);
-    }
+    await postMessage(currentSessionId, "user", text);
   } catch (e) {
-    appendLog(`[error] Failed to get agent response: ${e.message}`);
+    appendLog(`[error] Failed to store message: ${e.message}`);
+  }
+
+  // Send message via WebSocket for real-time agent response
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: "chat", message: text }));
+  } else {
+    // Fallback to HTTP if WebSocket not available
+    try {
+      const response = await postMessage(currentSessionId, "user", text);
+      if (response && response.assistant_response) {
+        appendMessage("assistant", response.assistant_response);
+        appendLog(`[assistant] ${response.assistant_response}`);
+      }
+    } catch (e) {
+      appendLog(`[error] Failed to get agent response: ${e.message}`);
+    }
   }
 });
 
@@ -345,7 +375,7 @@ generateBtn.addEventListener("click", async () => {
       setSessionId(id);
       connectWs(id);
       // Wait a bit for WebSocket to connect
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
     // Ensure WebSocket is connected
@@ -362,19 +392,12 @@ generateBtn.addEventListener("click", async () => {
     
     await startGeneration(currentSessionId);
     
-    // If WebSocket is connected, send generate command
+    // Send generate command via WebSocket
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: "generate" }));
     } else {
-      appendLog("[ui] WebSocket not ready, waiting...");
-      // Wait a bit more and try again
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: "generate" }));
-      } else {
-        appendMessage("assistant", "⚠️ WebSocket connection issue. Please try again.");
-        setGenerating(false);
-      }
+      appendMessage("assistant", "⚠️ WebSocket not connected. Please wait and try again.");
+      setGenerating(false);
     }
   } catch (e) {
     appendLog(`[error] ${e.message}`);
