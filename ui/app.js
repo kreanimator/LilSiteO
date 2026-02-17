@@ -1,8 +1,8 @@
 // LilSite-o UI (vanilla JS)
-// Assumes FastAPI agent at http://localhost:8080 by default.
+// Assumes FastAPI agent at http://localhost:9000 by default.
 // Change API_BASE if your backend runs elsewhere.
 
-const API_BASE = localStorage.getItem("lilsite_api_base") || "http://localhost:8080";
+const API_BASE = localStorage.getItem("lilsite_api_base") || "http://localhost:9000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 const el = (id) => document.getElementById(id);
