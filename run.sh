@@ -1,14 +1,13 @@
 #!/bin/bash
 
 # LilSite-o startup script
-# This script starts the FastAPI backend and UI server, then opens the browser
-
-set -e
+# This script starts vLLM, FastAPI backend and UI server, then opens the browser
 
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Get the script directory
@@ -29,18 +28,65 @@ if [ ! -f .env ]; then
     fi
 fi
 
-# Check if vLLM server is running
+# Load .env if it exists
+if [ -f .env ]; then
+    export $(cat .env | grep -v '^#' | xargs)
+fi
+
+# Set default model if not set
+LLM_MODEL="${LLM_MODEL:-Qwen/Qwen2.5-Coder-7B-Instruct}"
+
+# Check if vLLM server is running, start it if not
 echo -e "\n${YELLOW}Checking vLLM server...${NC}"
+VLLM_PID=""
 if curl -s http://localhost:8000/v1/models > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ vLLM server is running on port 8000${NC}"
+    echo -e "${GREEN}✓ vLLM server is already running on port 8000${NC}"
 else
-    echo -e "${RED}✗ vLLM server is not running on port 8000${NC}"
-    echo -e "${YELLOW}Please start vLLM server first:${NC}"
-    echo "  LLM_MODEL=\"Qwen/Qwen2.5-Coder-7B-Instruct\" services/agent/run_llm.sh"
+    echo -e "${YELLOW}✗ vLLM server is not running, starting it...${NC}"
+    
+    # Check if virtual environment exists for vLLM (might be in .venv or separate)
+    if [ -d .venv ]; then
+        source .venv/bin/activate
+    fi
+    
+    # Check if vllm is installed
+    if ! python -c "import vllm" 2>/dev/null; then
+        echo -e "${YELLOW}Installing vLLM...${NC}"
+        pip install vllm > /tmp/lilsite_vllm_install.log 2>&1 || {
+            echo -e "${RED}Failed to install vLLM. Check /tmp/lilsite_vllm_install.log${NC}"
+            exit 1
+        }
+    fi
+    
+    # Start vLLM in background
+    echo -e "${BLUE}Starting vLLM server with model: ${LLM_MODEL}${NC}"
+    cd services/agent
+    python -m vllm.entrypoints.openai.api_server \
+        --host 0.0.0.0 \
+        --port 8000 \
+        --model "$LLM_MODEL" > /tmp/lilsite_vllm.log 2>&1 &
+    VLLM_PID=$!
+    cd "$SCRIPT_DIR"
+    
+    # Wait for vLLM to start
+    echo -e "${YELLOW}Waiting for vLLM to start (this may take a minute)...${NC}"
+    MAX_WAIT=120
+    WAITED=0
+    while [ $WAITED -lt $MAX_WAIT ]; do
+        if curl -s http://localhost:8000/v1/models > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ vLLM server started (PID: $VLLM_PID)${NC}"
+            break
+        fi
+        sleep 2
+        WAITED=$((WAITED + 2))
+        echo -n "."
+    done
     echo ""
-    read -p "Continue anyway? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    
+    if [ $WAITED -ge $MAX_WAIT ]; then
+        echo -e "${RED}✗ vLLM server failed to start within ${MAX_WAIT}s${NC}"
+        echo -e "${YELLOW}Check /tmp/lilsite_vllm.log for errors${NC}"
+        tail -20 /tmp/lilsite_vllm.log
         exit 1
     fi
 fi
@@ -61,9 +107,16 @@ echo -e "\n${YELLOW}Checking dependencies...${NC}"
 if ! python -c "import fastapi" 2>/dev/null; then
     echo -e "${YELLOW}Installing dependencies...${NC}"
     cd services/agent
-    pip install -r requirements.txt > /dev/null 2>&1
-    cd "$SCRIPT_DIR"
-    echo -e "${GREEN}Dependencies installed${NC}"
+    if pip install -r requirements.txt > /tmp/lilsite_deps.log 2>&1; then
+        cd "$SCRIPT_DIR"
+        echo -e "${GREEN}✓ Dependencies installed${NC}"
+    else
+        cd "$SCRIPT_DIR"
+        echo -e "${RED}✗ Failed to install dependencies${NC}"
+        echo -e "${YELLOW}Check /tmp/lilsite_deps.log for errors${NC}"
+        tail -20 /tmp/lilsite_deps.log
+        exit 1
+    fi
 else
     echo -e "${GREEN}✓ Dependencies are installed${NC}"
 fi
@@ -76,70 +129,91 @@ echo -e "${GREEN}✓ Runtime directories ready${NC}"
 # Function to cleanup on exit
 cleanup() {
     echo -e "\n${YELLOW}Shutting down servers...${NC}"
-    kill $BACKEND_PID $UI_PID 2>/dev/null || true
-    wait $BACKEND_PID $UI_PID 2>/dev/null || true
+    [ -n "$BACKEND_PID" ] && kill $BACKEND_PID 2>/dev/null || true
+    [ -n "$UI_PID" ] && kill $UI_PID 2>/dev/null || true
+    [ -n "$VLLM_PID" ] && kill $VLLM_PID 2>/dev/null || true
+    wait $BACKEND_PID $UI_PID $VLLM_PID 2>/dev/null || true
     echo -e "${GREEN}Servers stopped${NC}"
     exit 0
 }
 
-trap cleanup SIGINT SIGTERM
+trap cleanup SIGINT SIGTERM EXIT
 
 # Start FastAPI backend
 echo -e "\n${YELLOW}Starting FastAPI backend on port 9000...${NC}"
 cd services/agent/app
-uvicorn main:app --host 0.0.0.0 --port 9000 > /tmp/lilsite_backend.log 2>&1 &
-BACKEND_PID=$!
-cd "$SCRIPT_DIR"
-
-# Wait for backend to start
-sleep 2
-if kill -0 $BACKEND_PID 2>/dev/null; then
-    echo -e "${GREEN}✓ Backend started (PID: $BACKEND_PID)${NC}"
+if uvicorn main:app --host 0.0.0.0 --port 9000 > /tmp/lilsite_backend.log 2>&1 &
+then
+    BACKEND_PID=$!
+    cd "$SCRIPT_DIR"
+    
+    # Wait for backend to start
+    sleep 3
+    if kill -0 $BACKEND_PID 2>/dev/null; then
+        echo -e "${GREEN}✓ Backend started (PID: $BACKEND_PID)${NC}"
+    else
+        echo -e "${RED}✗ Backend failed to start${NC}"
+        cat /tmp/lilsite_backend.log
+        exit 1
+    fi
 else
-    echo -e "${RED}✗ Backend failed to start${NC}"
-    cat /tmp/lilsite_backend.log
+    cd "$SCRIPT_DIR"
+    echo -e "${RED}✗ Failed to start backend${NC}"
     exit 1
 fi
 
 # Start UI server
 echo -e "\n${YELLOW}Starting UI server on port 3000...${NC}"
 cd ui
-python3 -m http.server 3000 > /tmp/lilsite_ui.log 2>&1 &
-UI_PID=$!
-cd "$SCRIPT_DIR"
-
-# Wait for UI to start
-sleep 1
-if kill -0 $UI_PID 2>/dev/null; then
-    echo -e "${GREEN}✓ UI server started (PID: $UI_PID)${NC}"
+if python3 -m http.server 3000 > /tmp/lilsite_ui.log 2>&1 &
+then
+    UI_PID=$!
+    cd "$SCRIPT_DIR"
+    
+    # Wait for UI to start
+    sleep 1
+    if kill -0 $UI_PID 2>/dev/null; then
+        echo -e "${GREEN}✓ UI server started (PID: $UI_PID)${NC}"
+    else
+        echo -e "${RED}✗ UI server failed to start${NC}"
+        cat /tmp/lilsite_ui.log
+        exit 1
+    fi
 else
-    echo -e "${RED}✗ UI server failed to start${NC}"
-    cat /tmp/lilsite_ui.log
-    cleanup
+    cd "$SCRIPT_DIR"
+    echo -e "${RED}✗ Failed to start UI server${NC}"
     exit 1
 fi
 
 # Wait a bit more for servers to be ready
-sleep 1
+sleep 2
 
 # Check if servers are responding
+echo -e "\n${YELLOW}Verifying servers...${NC}"
 if curl -s http://localhost:9000/health > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Backend is responding${NC}"
 else
     echo -e "${YELLOW}⚠ Backend might not be ready yet${NC}"
 fi
 
+if curl -s http://localhost:3000 > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ UI server is responding${NC}"
+else
+    echo -e "${YELLOW}⚠ UI might not be ready yet${NC}"
+fi
+
 # Open browser
 echo -e "\n${GREEN}Opening browser...${NC}"
+sleep 1
 if command -v open > /dev/null; then
     # macOS
-    open http://localhost:3000
+    open http://localhost:3000 2>/dev/null || true
 elif command -v xdg-open > /dev/null; then
     # Linux
-    xdg-open http://localhost:3000
+    xdg-open http://localhost:3000 2>/dev/null || true
 elif command -v start > /dev/null; then
     # Windows (Git Bash)
-    start http://localhost:3000
+    start http://localhost:3000 2>/dev/null || true
 else
     echo -e "${YELLOW}Please open http://localhost:3000 in your browser${NC}"
 fi
@@ -150,8 +224,30 @@ echo -e "${GREEN}================================${NC}"
 echo -e "Backend:  http://localhost:9000"
 echo -e "UI:       http://localhost:3000"
 echo -e "vLLM:     http://localhost:8000"
+if [ -n "$VLLM_PID" ]; then
+    echo -e "\n${YELLOW}Note: vLLM was started by this script (PID: $VLLM_PID)${NC}"
+    echo -e "${YELLOW}It will be stopped when you press Ctrl+C${NC}"
+fi
 echo -e "\n${YELLOW}Press Ctrl+C to stop all servers${NC}"
 echo ""
 
-# Wait for user interrupt
-wait
+# Keep script running and monitor processes
+while true; do
+    # Check if processes are still running
+    if [ -n "$BACKEND_PID" ] && ! kill -0 $BACKEND_PID 2>/dev/null; then
+        echo -e "${RED}Backend process died!${NC}"
+        tail -20 /tmp/lilsite_backend.log
+        break
+    fi
+    if [ -n "$UI_PID" ] && ! kill -0 $UI_PID 2>/dev/null; then
+        echo -e "${RED}UI server process died!${NC}"
+        tail -20 /tmp/lilsite_ui.log
+        break
+    fi
+    if [ -n "$VLLM_PID" ] && ! kill -0 $VLLM_PID 2>/dev/null; then
+        echo -e "${RED}vLLM process died!${NC}"
+        tail -20 /tmp/lilsite_vllm.log
+        break
+    fi
+    sleep 5
+done
