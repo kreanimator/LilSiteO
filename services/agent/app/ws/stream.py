@@ -59,18 +59,24 @@ async def generate_site_stream(websocket: WebSocket, session_id: str):
         prompt_messages = get_site_generation_prompt(user_prompt, messages)
         
         await websocket.send_json(assistant_message_event("🤖 Generating website code..."))
-        await websocket.send_json(log_event("Calling LLM..."))
+        await websocket.send_json(log_event("Calling LLM (this may take a minute)..."))
         
-        # Stream LLM response
+        # Stream LLM response with timeout handling
         full_response = ""
         token_count = 0
-        for delta in llm.stream_chat(prompt_messages, temperature=0.7, max_tokens=4000):
-            await websocket.send_json(assistant_token_event(delta))
-            full_response += delta
-            token_count += 1
-            # Send progress update every 50 tokens
-            if token_count % 50 == 0:
-                await websocket.send_json(log_event(f"Generated {token_count} tokens..."))
+        try:
+            for delta in llm.stream_chat(prompt_messages, temperature=0.7, max_tokens=4000):
+                await websocket.send_json(assistant_token_event(delta))
+                full_response += delta
+                token_count += 1
+                # Send progress update every 50 tokens
+                if token_count % 50 == 0:
+                    await websocket.send_json(log_event(f"Generated {token_count} tokens..."))
+        except LLMError as e:
+            error_msg = str(e)
+            await websocket.send_json(assistant_message_event(f"❌ {error_msg}"))
+            await websocket.send_json(error_event(error_msg))
+            return
         
         if not full_response.strip():
             await websocket.send_json(assistant_message_event("❌ LLM returned empty response"))

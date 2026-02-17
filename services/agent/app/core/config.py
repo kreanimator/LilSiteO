@@ -17,7 +17,7 @@ class Config:
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://localhost:8000").rstrip("/")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-Coder-7B-Instruct")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "EMPTY")
-    LLM_TIMEOUT_S: float = float(os.getenv("LLM_TIMEOUT_S", "120"))
+    LLM_TIMEOUT_S: float = float(os.getenv("LLM_TIMEOUT_S", "300"))  # 5 minutes for generation
     
     # Server settings
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")

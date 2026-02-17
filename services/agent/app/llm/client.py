@@ -19,14 +19,14 @@ class LLMConfig:
     base_url: str
     model: str
     api_key: str = "EMPTY"
-    timeout_s: float = 120.0
+    timeout_s: float = 300.0  # 5 minutes default
 
     @staticmethod
     def from_env() -> "LLMConfig":
         base_url = os.getenv("LLM_BASE_URL", "http://localhost:8000").rstrip("/")
         model = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-Coder-7B-Instruct")
         api_key = os.getenv("LLM_API_KEY", "EMPTY")
-        timeout_s = float(os.getenv("LLM_TIMEOUT_S", "120"))
+        timeout_s = float(os.getenv("LLM_TIMEOUT_S", "300"))  # 5 minutes default
         return LLMConfig(base_url=base_url, model=model, api_key=api_key, timeout_s=timeout_s)
 
 
@@ -158,7 +158,17 @@ class LLMClient:
         url = f"{self.cfg.base_url}/v1/chat/completions"
 
         try:
-            with httpx.Client(timeout=self.cfg.timeout_s) as client:
+            # Use longer timeout for streaming - separate connect and read timeouts
+            # For streaming, read timeout should be very long since chunks arrive over time
+            # Use a large value (600s = 10 minutes) to allow for slow generation
+            timeout = httpx.Timeout(
+                connect=30.0,  # 30s to connect
+                read=600.0,  # 10 minutes for reading stream (chunks arrive over time)
+                write=30.0,  # 30s to write request
+                pool=30.0  # 30s to get connection from pool
+            )
+            
+            with httpx.Client(timeout=timeout) as client:
                 with client.stream(
                     "POST",
                     url,
@@ -198,5 +208,15 @@ class LLMClient:
                         if isinstance(text, str) and text:
                             yield text
 
+        except httpx.TimeoutException as e:
+            raise LLMError(
+                f"LLM request timed out after {self.cfg.timeout_s}s. "
+                f"The model might be slow or overloaded. Try increasing LLM_TIMEOUT_S in .env"
+            ) from e
+        except httpx.ConnectError as e:
+            raise LLMError(
+                f"Failed to connect to LLM server at {self.cfg.base_url}. "
+                f"Make sure vLLM is running: curl {self.cfg.base_url}/v1/models"
+            ) from e
         except httpx.RequestError as e:
             raise LLMError(f"LLM streaming request failed to {url}: {e}") from e
