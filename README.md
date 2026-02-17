@@ -1,283 +1,78 @@
-LilSite-o
+# LilSite-o
 
-A tiny AI agent that builds static websites from prompts.
+A tiny AI agent that builds static websites from prompts. Local-first, simple, and hackable.
 
-LilSite-o is a local-first, open-source project that generates small static sites using an LLM, then previews them instantly in a built-in UI.
+## Quick Start
 
-The goal is to keep the architecture:
+```bash
+./run.sh
+```
 
-simple
+This script will:
+- Check/start vLLM server (if needed)
+- Start FastAPI backend (port 9000)
+- Start UI server (port 3000)
+- Open browser automatically
 
-transparent
+## Manual Setup
 
-hackable
-
-easy to run on a single machine
-
-Core idea
-User prompt
-   ↓
-LLM (local server)
-   ↓
-Agent (FastAPI)
-   ↓
-Static site files
-   ↓
-Published preview
-   ↓
-Iframe in UI
-
-
-No heavy frameworks, no complex orchestration.
-
-Current status (v0 skeleton)
-Implemented
-
-Project structure
-
-UI (chat + logs + preview iframe)
-
-FastAPI backend skeleton
-
-LLM client (OpenAI-compatible)
-
-Local model server via vLLM
-
-Basic generation flow (structure ready)
-
-Not implemented yet
-
-Real site generation logic
-
-Template rendering
-
-Validator
-
-Persistent session storage
-
-Multi-step agent logic
-
-Project structure
-lilsite-o/
-│
-├─ README.md
-├─ .env.example
-├─ run.sh
-│
-├─ services/
-│  ├─ agent/
-│  │  ├─ app/
-│  │  │  ├─ main.py              # FastAPI entrypoint
-│  │  │  │
-│  │  │  ├─ api/
-│  │  │  │   ├─ sessions.py
-│  │  │  │   ├─ generate.py
-│  │  │  │   └─ health.py
-│  │  │  │
-│  │  │  ├─ ws/
-│  │  │  │   └─ stream.py
-│  │  │  │
-│  │  │  ├─ core/
-│  │  │  │   ├─ config.py
-│  │  │  │   ├─ models.py
-│  │  │  │   ├─ events.py
-│  │  │  │   ├─ storage.py
-│  │  │  │   └─ publish.py
-│  │  │  │
-│  │  │  ├─ llm/
-│  │  │  │   ├─ client.py        # LLM client (OpenAI-compatible)
-│  │  │  │   └─ prompts.py
-│  │  │  │
-│  │  │  ├─ tools/
-│  │  │  │   ├─ site_writer.py
-│  │  │  │   ├─ assets.py
-│  │  │  │   └─ validator.py
-│  │  │  │
-│  │  │  └─ runners/
-│  │  │      ├─ host_runner.py
-│  │  │      └─ sandbox.py
-│  │  │
-│  │  ├─ requirements.txt
-│  │  └─ run_llm.sh              # starts vLLM server
-│  │
-│  └─ llm/
-│     └─ vllm/
-│
-├─ ui/
-│  ├─ index.html
-│  ├─ app.js
-│  ├─ styles.css
-│  └─ components/
-│     ├─ layout.css
-│     └─ chat.css
-│
-├─ templates/
-│  ├─ sites/
-│  │  └─ landing/
-│  │     ├─ index.html
-│  │     ├─ styles.css
-│  │     └─ pages/
-│  │        ├─ privacy.html
-│  │        ├─ terms.html
-│  │        └─ contact.html
-│  │
-│  └─ icons/
-│     ├─ globe.svg
-│     ├─ coffee.svg
-│     ├─ briefcase.svg
-│     ├─ heart.svg
-│     └─ lightning.svg
-│
-└─ runtime/
-   ├─ runs/        # temporary session workspaces
-   ├─ published/   # static preview output
-   └─ logs/
-
-Requirements
-
-Python 3.10+
-
-16–32GB RAM recommended
-
-GPU recommended for local LLM (optional but ideal)
-
-Setup
-1. Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-2. Install agent dependencies
-cd services/agent
-pip install -r requirements.txt
-
-3. Install vLLM
-pip install vllm
-
-Run the local LLM server
-
-From project root:
-
-LLM_MODEL="Qwen/Qwen2.5-Coder-7B-Instruct" \
-services/agent/run_llm.sh
-
-
-Test it:
-
-curl http://localhost:8000/v1/models
-
-Configure environment
-
-Create .env in repo root:
-
+1. **Create `.env` file:**
+```bash
 LLM_BASE_URL=http://localhost:8000
 LLM_MODEL=Qwen/Qwen2.5-Coder-7B-Instruct
 LLM_API_KEY=EMPTY
+```
 
-Run the agent backend
+2. **Start vLLM server:**
+```bash
+LLM_MODEL="Qwen/Qwen2.5-Coder-7B-Instruct" services/agent/run_llm.sh
+```
 
-From:
-
-services/agent/app
-
-
-Run:
-
+3. **Start backend:**
+```bash
+cd services/agent/app
 uvicorn main:app --reload --port 9000
+```
 
-Run the UI
-
-From repo root:
-
+4. **Start UI:**
+```bash
 cd ui
 python -m http.server 3000
+```
 
+5. **Open:** http://localhost:3000
 
-Open:
+## How It Works
 
-http://localhost:3000
+1. **Chat** with the agent about your website idea
+2. **Generate** when ready - the agent creates HTML/CSS files
+3. **Preview** appears instantly in the UI
 
-Runtime folders
+The agent generates:
+- Complete HTML pages with embedded CSS
+- Multi-page sites (if navigation links are created)
+- Minimalistic color blocks instead of images
+- Inline SVG icons
+- Responsive, modern designs
 
-These are created automatically:
+## Requirements
 
-runtime/
-  runs/         # per-session working directories
-  published/    # preview-ready static sites
-  logs/
+- Python 3.10+
+- 16-32GB RAM (for local LLM)
+- GPU recommended (optional but ideal)
 
+## Project Structure
 
-Example:
+```
+lilsite-o/
+├── services/agent/app/    # FastAPI backend
+├── ui/                    # Web UI
+├── runtime/               # Generated sites (auto-created)
+│   ├── runs/             # Session workspaces
+│   └── published/        # Preview-ready sites
+└── run.sh                # Startup script
+```
 
-runtime/published/abc123/index.html
+## License
 
-
-Preview URL:
-
-http://localhost:9000/preview/abc123/index.html
-
-How generation will work (planned flow)
-
-UI sends prompt
-
-Agent calls LLM
-
-LLM returns site plan or files
-
-Agent:
-
-writes files
-
-validates them
-
-publishes to runtime/published/{session}
-
-UI loads preview in iframe
-
-Design principles
-
-Local-first
-
-Minimal dependencies
-
-No heavy agent frameworks
-
-Simple static output
-
-Fully inspectable runs
-
-Roadmap
-v0.1
-
-Deterministic site generation (no LLM)
-
-Static templates
-
-Publish + preview
-
-v0.2
-
-LLM-generated content
-
-Theme + page structure
-
-Validation
-
-v0.3
-
-Edit existing site
-
-Multi-page reasoning
-
-Asset generation
-
-v0.4
-
-Docker support
-
-Remote deployment
-
-User/session storage
-
-License
-
-MIT (recommended for open-source dev tools)
+MIT

@@ -187,10 +187,11 @@ function connectWs(sessionId) {
     switch (ev.type) {
       case "log":
         appendLog(`[log] ${ev.message ?? ""}`);
-        // Show visual feedback in UI
+        // Only set generating state for explicit generation start messages
         if (ev.message) {
           const msgLower = ev.message.toLowerCase();
-          if (msgLower.includes("generation") || msgLower.includes("generating") || msgLower.includes("starting")) {
+          // Only trigger on actual generation start, not just any log message
+          if (msgLower.includes("starting generation") || msgLower.includes("generating website code")) {
             setGenerating(true);
           }
         }
@@ -284,6 +285,9 @@ function setSessionId(id) {
   if (previewEmpty) {
     previewEmpty.style.display = "block";
   }
+  
+  // Ensure Generate button is in correct initial state
+  setGenerating(false);
   
   if (currentSessionId) {
     sessionIdInput.value = currentSessionId;
