@@ -96,10 +96,15 @@ async def generate_site_stream(websocket: WebSocket, session_id: str):
 
 
 
+# Store active WebSocket connections per session
+_active_connections: dict[str, WebSocket] = {}
+
+
 @router.websocket("/sessions/{session_id}/stream")
 async def websocket_stream(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for streaming generation progress."""
     await websocket.accept()
+    _active_connections[session_id] = websocket
     
     try:
         # Check if session exists
@@ -109,21 +114,28 @@ async def websocket_stream(websocket: WebSocket, session_id: str):
             await websocket.close()
             return
         
-        # Auto-start generation when WebSocket connects (if messages exist)
+        await websocket.send_json(log_event("WebSocket connected. Ready for generation."))
+        
+        # Wait for generate command or auto-start if messages exist
         messages = storage.get_messages(session_id)
         if messages:
             # Auto-start generation if there are messages
+            await websocket.send_json(log_event("Messages found. Starting generation..."))
             await generate_site_stream(websocket, session_id)
         else:
             # Wait for generate command via WebSocket message
-            await websocket.send_json(log_event("Connected. Send 'generate' to start, or add a message first."))
             try:
                 while True:
                     data = await websocket.receive_text()
-                    # Trigger generation on "generate" command
-                    if data.strip().lower() == "generate":
-                        await generate_site_stream(websocket, session_id)
-                        break
+                    try:
+                        msg = json.loads(data)
+                        if msg.get("action") == "generate":
+                            await generate_site_stream(websocket, session_id)
+                            break
+                    except json.JSONDecodeError:
+                        if data.strip().lower() == "generate":
+                            await generate_site_stream(websocket, session_id)
+                            break
             except WebSocketDisconnect:
                 pass
         
@@ -134,3 +146,5 @@ async def websocket_stream(websocket: WebSocket, session_id: str):
             await websocket.send_json(error_event(f"Unexpected error: {str(e)}"))
         except Exception:
             pass
+    finally:
+        _active_connections.pop(session_id, None)

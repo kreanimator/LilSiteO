@@ -1,7 +1,7 @@
 """Write site files from LLM output."""
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 
 def extract_html_from_response(text: str) -> Optional[str]:
@@ -32,6 +32,19 @@ def extract_html_from_response(text: str) -> Optional[str]:
         return text.strip()
     
     return None
+
+
+def split_multiple_pages(html_content: str) -> List[tuple[str, str]]:
+    """
+    Attempt to split LLM output into multiple page files.
+    
+    Returns list of (filename, content) tuples.
+    For now, just returns the main index.html.
+    In the future, this could parse the LLM output to extract multiple pages.
+    """
+    # For now, just return the main page
+    # Future: parse LLM output that might contain multiple pages
+    return [("index.html", html_content)]
 
 
 def write_site_file(session_dir: Path, html_content: str, filename: str = "index.html") -> Path:

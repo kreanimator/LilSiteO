@@ -86,6 +86,12 @@ function setPreview(sessionId) {
   const url = previewUrlFor(sessionId);
   previewUrlInput.value = url;
   previewFrame.src = url;
+  // Show frame and hide empty state
+  const previewEmpty = el("previewEmpty");
+  if (previewEmpty) {
+    previewEmpty.style.display = "none";
+    previewFrame.style.display = "block";
+  }
 }
 
 // ---------- API calls ----------
@@ -164,6 +170,11 @@ function connectWs(sessionId) {
     switch (ev.type) {
       case "log":
         appendLog(`[log] ${ev.message ?? ""}`);
+        // Show visual feedback in UI
+        if (ev.message && ev.message.toLowerCase().includes("generation")) {
+          generateBtn.disabled = true;
+          generateBtn.textContent = "Generating...";
+        }
         break;
 
       case "assistant_message":
@@ -177,16 +188,35 @@ function connectWs(sessionId) {
 
       case "artifact_published":
         appendLog(`[artifact] published`);
+        generateBtn.disabled = false;
+        generateBtn.textContent = "Generate";
         if (ev.preview_url) {
           previewUrlInput.value = ev.preview_url;
           previewFrame.src = ev.preview_url;
+          // Hide empty state
+          const previewEmpty = el("previewEmpty");
+          if (previewEmpty) {
+            previewEmpty.style.display = "none";
+            previewFrame.style.display = "block";
+          }
         } else {
-          setPreview(sessionId);
+          setPreview(currentSessionId);
+          const previewEmpty = el("previewEmpty");
+          if (previewEmpty) {
+            previewEmpty.style.display = "none";
+            previewFrame.style.display = "block";
+          }
         }
         break;
 
       case "error":
         appendLog(`[error] ${ev.message ?? "unknown error"}`);
+        generateBtn.disabled = false;
+        generateBtn.textContent = "Generate";
+        break;
+
+      case "status":
+        appendLog(`[status] ${ev.status ?? ""}`);
         break;
 
       default:
@@ -219,9 +249,16 @@ function setSessionId(id) {
 }
 
 (async function init() {
+  // Initially hide preview frame and show empty state
+  previewFrame.style.display = "none";
+  const previewEmpty = el("previewEmpty");
+  if (previewEmpty) {
+    previewEmpty.style.display = "block";
+  }
+  
   if (currentSessionId) {
     sessionIdInput.value = currentSessionId;
-    setPreview(currentSessionId);
+    // Don't auto-load preview on init
   }
 })();
 
@@ -268,11 +305,31 @@ generateBtn.addEventListener("click", async () => {
       const id = await createSession();
       setSessionId(id);
       connectWs(id);
+      // Wait a bit for WebSocket to connect
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
-    appendLog("[ui] start generation");
+    
+    // Ensure WebSocket is connected
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      appendLog("[ui] Connecting WebSocket...");
+      connectWs(currentSessionId);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    appendLog("[ui] Starting generation...");
+    generateBtn.disabled = true;
+    generateBtn.textContent = "Generating...";
+    
     await startGeneration(currentSessionId);
+    
+    // If WebSocket is connected, send generate command
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: "generate" }));
+    }
   } catch (e) {
     appendLog(`[error] ${e.message}`);
+    generateBtn.disabled = false;
+    generateBtn.textContent = "Generate";
   }
 });
 

@@ -20,9 +20,19 @@ Requirements:
 - Make it responsive
 - Use semantic HTML5 elements
 - The page should be self-contained (no external dependencies unless necessary)
+- Use inline SVG for icons (simple shapes, no external files)
+- If the site needs multiple pages (like privacy, terms, contact), create a simple navigation structure
+- Use modern CSS (flexbox/grid) for layout
+- Add subtle animations and hover effects for better UX
+
+For multi-page sites:
+- Create a main index.html with navigation
+- Include links to /pages/privacy.html, /pages/terms.html, /pages/contact.html if mentioned
+- Each page should be self-contained HTML files
 
 Output format:
-Return the complete HTML file content, nothing else. No markdown code blocks, no explanations."""
+Return the complete HTML file content, nothing else. No markdown code blocks, no explanations.
+Start directly with <!DOCTYPE html>."""
 
     # Build conversation context
     messages = [{"role": "system", "content": system_prompt}]
@@ -39,7 +49,7 @@ Return the complete HTML file content, nothing else. No markdown code blocks, no
     if not conversation_history or conversation_history[-1].get("content") != user_prompt:
         messages.append({
             "role": "user",
-            "content": f"Generate a static website for: {user_prompt}"
+            "content": f"Generate a static website for: {user_prompt}. Include all necessary pages, styles, and inline SVG icons."
         })
     
     return messages
