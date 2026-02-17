@@ -63,7 +63,10 @@ function appendMessage(role, content) {
 
   const body = document.createElement("div");
   body.className = "content";
-  body.textContent = content;
+  // Support markdown-like formatting (simple)
+  body.innerHTML = content
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
 
   wrap.appendChild(meta);
   wrap.appendChild(body);
@@ -76,6 +79,17 @@ function setWsStatus(s) {
   wsStatus.style.color = (s === "connected") ? "var(--accent)" :
                          (s === "connecting") ? "var(--accent2)" :
                          "rgba(255,255,255,.65)";
+}
+
+function setGenerating(isGenerating) {
+  generateBtn.disabled = isGenerating;
+  if (isGenerating) {
+    generateBtn.innerHTML = '<span class="spinner"></span> Generating...';
+    generateBtn.classList.add("generating");
+  } else {
+    generateBtn.textContent = "Generate";
+    generateBtn.classList.remove("generating");
+  }
 }
 
 function previewUrlFor(sessionId) {
@@ -103,14 +117,16 @@ async function createSession() {
 }
 
 async function postMessage(sessionId, role, content) {
-  // Optional endpoint. If you don’t have it, you can remove this call.
   const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role, content })
   });
-  // Don't hard-fail UI if endpoint isn't implemented yet.
-  if (!res.ok) appendLog(`[warn] POST /messages returned ${res.status} (you can ignore if not implemented)`);
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`POST /messages returned ${res.status}: ${errorText}`);
+  }
+  return await res.json();
 }
 
 async function startGeneration(sessionId) {
@@ -137,6 +153,7 @@ function connectWs(sessionId) {
   ws.onopen = () => {
     appendLog("[ws] connected");
     setWsStatus("connected");
+    // Welcome message will come from server
   };
 
   ws.onclose = () => {
@@ -171,25 +188,32 @@ function connectWs(sessionId) {
       case "log":
         appendLog(`[log] ${ev.message ?? ""}`);
         // Show visual feedback in UI
-        if (ev.message && ev.message.toLowerCase().includes("generation")) {
-          generateBtn.disabled = true;
-          generateBtn.textContent = "Generating...";
+        if (ev.message) {
+          const msgLower = ev.message.toLowerCase();
+          if (msgLower.includes("generation") || msgLower.includes("generating") || msgLower.includes("starting")) {
+            setGenerating(true);
+          }
         }
         break;
 
       case "assistant_message":
         appendMessage("assistant", ev.content ?? "");
+        // Also log important assistant messages
+        if (ev.content) {
+          const content = ev.content;
+          // Log all assistant messages to logs tab
+          appendLog(`[assistant] ${content.replace(/[🚀✅🎉❌⚠️📡🤖📝🔍📦💬👋]/g, "").trim()}`);
+        }
         break;
 
       case "assistant_token":
-        // Optional: stream tokens into the last assistant bubble
+        // Stream tokens into the last assistant bubble
         streamToken(ev.delta ?? "");
         break;
 
       case "artifact_published":
         appendLog(`[artifact] published`);
-        generateBtn.disabled = false;
-        generateBtn.textContent = "Generate";
+        setGenerating(false);
         if (ev.preview_url) {
           previewUrlInput.value = ev.preview_url;
           previewFrame.src = ev.preview_url;
@@ -211,8 +235,8 @@ function connectWs(sessionId) {
 
       case "error":
         appendLog(`[error] ${ev.message ?? "unknown error"}`);
-        generateBtn.disabled = false;
-        generateBtn.textContent = "Generate";
+        appendMessage("assistant", `❌ Error: ${ev.message ?? "unknown error"}`);
+        setGenerating(false);
         break;
 
       case "status":
@@ -236,7 +260,12 @@ function streamToken(delta) {
     const items2 = messagesEl.querySelectorAll(".msg.assistant .content");
     target = items2[items2.length - 1];
   }
-  target.textContent += delta;
+  
+  // Append text, preserving any existing HTML
+  const currentText = target.textContent || target.innerText || "";
+  const newText = currentText + delta;
+  // Simple formatting: convert markdown-style to HTML
+  target.textContent = newText;
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
@@ -290,13 +319,23 @@ promptForm.addEventListener("submit", async (e) => {
     const id = await createSession();
     setSessionId(id);
     connectWs(id);
+    // Wait for WebSocket to connect
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
 
   appendMessage("user", text);
   promptInput.value = "";
 
-  // Optional: store message server-side
-  await postMessage(currentSessionId, "user", text);
+  // Store message and get agent response
+  try {
+    const response = await postMessage(currentSessionId, "user", text);
+    if (response && response.assistant_response) {
+      appendMessage("assistant", response.assistant_response);
+      appendLog(`[assistant] ${response.assistant_response}`);
+    }
+  } catch (e) {
+    appendLog(`[error] Failed to get agent response: ${e.message}`);
+  }
 });
 
 generateBtn.addEventListener("click", async () => {
@@ -312,24 +351,35 @@ generateBtn.addEventListener("click", async () => {
     // Ensure WebSocket is connected
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       appendLog("[ui] Connecting WebSocket...");
+      appendMessage("assistant", "🔌 Connecting to server...");
       connectWs(currentSessionId);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
     appendLog("[ui] Starting generation...");
-    generateBtn.disabled = true;
-    generateBtn.textContent = "Generating...";
+    appendMessage("assistant", "🚀 Initiating website generation...");
+    setGenerating(true);
     
     await startGeneration(currentSessionId);
     
     // If WebSocket is connected, send generate command
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: "generate" }));
+    } else {
+      appendLog("[ui] WebSocket not ready, waiting...");
+      // Wait a bit more and try again
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "generate" }));
+      } else {
+        appendMessage("assistant", "⚠️ WebSocket connection issue. Please try again.");
+        setGenerating(false);
+      }
     }
   } catch (e) {
     appendLog(`[error] ${e.message}`);
-    generateBtn.disabled = false;
-    generateBtn.textContent = "Generate";
+    appendMessage("assistant", `❌ Error: ${e.message}`);
+    setGenerating(false);
   }
 });
 

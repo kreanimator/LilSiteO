@@ -36,15 +36,39 @@ def extract_html_from_response(text: str) -> Optional[str]:
 
 def split_multiple_pages(html_content: str) -> List[tuple[str, str]]:
     """
-    Attempt to split LLM output into multiple page files.
+    Split LLM output into multiple page files.
+    
+    Expected format:
+    === index.html ===
+    <!DOCTYPE html>...
+    
+    === pages/privacy.html ===
+    <!DOCTYPE html>...
     
     Returns list of (filename, content) tuples.
-    For now, just returns the main index.html.
-    In the future, this could parse the LLM output to extract multiple pages.
     """
-    # For now, just return the main page
-    # Future: parse LLM output that might contain multiple pages
-    return [("index.html", html_content)]
+    pages = []
+    
+    # Look for === filename === pattern
+    pattern = r'===?\s*([^\n=]+?)\s*===?\s*\n(.*?)(?=\n===?\s*[^\n=]+?\s*===?\s*\n|$)'
+    matches = re.finditer(pattern, html_content, re.DOTALL)
+    
+    for match in matches:
+        filename = match.group(1).strip()
+        content = match.group(2).strip()
+        if filename and content:
+            pages.append((filename, content))
+    
+    # If no matches found, treat entire content as index.html
+    if not pages:
+        # Try to extract from markdown code blocks
+        html_extracted = extract_html_from_response(html_content)
+        if html_extracted:
+            pages.append(("index.html", html_extracted))
+        else:
+            pages.append(("index.html", html_content))
+    
+    return pages
 
 
 def write_site_file(session_dir: Path, html_content: str, filename: str = "index.html") -> Path:
@@ -59,8 +83,9 @@ def write_site_file(session_dir: Path, html_content: str, filename: str = "index
     Returns:
         Path to the written file
     """
-    session_dir.mkdir(parents=True, exist_ok=True)
+    # Handle nested paths (e.g., pages/privacy.html)
     output_path = session_dir / filename
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Extract HTML if wrapped in markdown
     clean_html = extract_html_from_response(html_content)
@@ -85,3 +110,24 @@ def write_site_file(session_dir: Path, html_content: str, filename: str = "index
     
     output_path.write_text(clean_html, encoding="utf-8")
     return output_path
+
+
+def write_multiple_pages(session_dir: Path, full_response: str) -> List[Path]:
+    """
+    Write multiple HTML pages from LLM response.
+    
+    Args:
+        session_dir: Directory to write to
+        full_response: Full LLM response containing multiple pages
+    
+    Returns:
+        List of paths to written files
+    """
+    pages = split_multiple_pages(full_response)
+    written_files = []
+    
+    for filename, content in pages:
+        file_path = write_site_file(session_dir, content, filename)
+        written_files.append(file_path)
+    
+    return written_files
